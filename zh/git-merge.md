@@ -3,8 +3,9 @@ git-merge 手册页
 ===============
 
 -----------------------
+
 ####名字
-`git-merge` - 合并两个或更多的提交历史
+`git-merge` - 合并两个或多个提交历史
 
 ####语法
 ```
@@ -99,19 +100,91 @@ git-merge 手册页
 这种快进式行为可以被这个参数选项禁用：`--no-ff`。
 
 ####真实合并
+除了快进式合并（参见上面），被合并的分支必须被一个新的合并记录粘合到一起，这个新的合并记录把当前分支和被合并的分支列为父记录。
+
+生成的合并版本融合了所有分支提交的改动，你的版本库的头指针，暂存区及工作区会被更新到这个版本。工作区中有可能有文件修改未提交，这些未提交的修改可以一直保留直到和上游的改动有重合。
+
+如果不能明确地融合这些改动，将会执行这些步骤：
+>1. `HEAD`指针保持不变
+>2. `MERGE_HEAD`指针指向另外一个分支头
+>3. 更新成功合并的文件到暂存区和工作目录
+>4. 对于冲突的文件，暂存区记录最多三个版本：1记录共同祖先的版本；2记录`HEAD`的版本；3记录`MERGE_HEAD`的版本（你可以用这个指令`git ls-files -u`审查这些版本）。工作区则记录下“merge”程序执行的结果：例如，三方合并执行的结果是增加了熟悉的冲突标记`<<<===>>>`。（译者注：此处merge非git-merge）
+>5. 其它不做改动。合并之前的本地修改将会保留，与之对应的暂存区中的文件也和合并之前保持一致。
+
+如果你尝试的合并导致了一个复杂的冲突结果而想重新开始，你可以通过`git merge --abort`来恢复。
 
 ####冲突是怎么呈现的
+在合并过程中，工作区文件会被更新以用来反映合并结果。在相对于共同祖先的改动之中，非重叠部分（比如，你修改了文件的一部分，而另一边未修改这部分，诸如此类）会被逐字地组合在一起。然而当两边修改了同一部分，git不能随机选择其中一边而放弃另一边，它会给你留下两边的改动让你来解决。
+
+默认情况下，git会使用和RCS套件中的'merge'(译者注：RCS是另一款版本管理工具，http://www.idi.ntnu.no/~systprog/rcs/)程序相同的风格来呈现冲突内容，像这样：
+```c
+Here are lines that are either unchanged from the common
+ancestor, or cleanly resolved because only one side changed.
+<<<<<<< yours:sample.txt
+Conflict resolution is hard;
+let's go shopping.
+=======
+Git makes conflict resolution easy.
+>>>>>>> theirs:sample.txt
+And here is another line that is cleanly resolved or unmodified.
+```
+冲突区域被`<<<<<<<`,`=======`和`>>>>>>>`标记出来。`=======`之前的部分是你的修改，之后的部分是其它人的修改。
+
+默认的格式没有显示出原始文件中冲突区域的内容。你不能判断出有多少行被其它人删除/替换。你仅仅知道你这边改成了什么，其它人那边改成了什么。
+
+可以选择在配置中设置`merge.conflictstyle`变量的值为`diff3`，这样上面的冲突会变成这样：
+```c
+Here are lines that are either unchanged from the common
+ancestor, or cleanly resolved because only one side changed.
+<<<<<<< yours:sample.txt
+Conflict resolution is hard;
+let's go shopping.
+|||||||
+Conflict resolution is hard.
+=======
+Git makes conflict resolution easy.
+>>>>>>> theirs:sample.txt
+And here is another line that is cleanly resolved or unmodified.
+```
+除了`<<<<<<<`,`=======`和`>>>>>>>`标记外，这个指令使用了`|||||||`标记，后面跟着的是原始内容。你可以分辨原始内容，你的改动及其它人的改动。有时根据原始内容能更好地解决冲突。
 
 ####怎么解决冲突
+当冲突出现时，你可以采取以下两种手段：
+
+- 暂时不合并。你需要做的清理工作是重置暂存区文件到`HEAD`指向的文件状态，以撤消合并时做的第2步，然后撤消工作区第2步和第3步的改动（译者注：原文档可能笔误，这里的第2步应该指合并时的第3步`更新成功合并的文件到暂存区和工作目录`，这里的第3步应该指的合并时的第4步）；`git merge --abort`适用这种场景，用来撤消合并。
+- 解决冲突。Git会在工作区中标记冲突，编辑冲突的文件然后使用`git add`把它们加入暂存区，最后使用`git commit`来完成合并。
+
+你还可以借助以下一些工具来解决冲突：
+
+- 使用一款合并工具：`git mergetool`将会打开图形合并工具
+- 查看改动：`git diff`将会展示三方改动，并高亮显示来自`HEAD`和`MERGE_HEAD`的改动
+- 查看各个分支的改动：`git log --merge -p <path>`将会先展示来自`HEAD`的改动，然后展示来自`MERGE_HEAD`的改动
+- 查看原始文件：`git show :1:filename`显示共同祖先的原始文件；`git show :2:filename`显示`HEAD`原始文件；`git show :3:filename`显示`MERGE_HEAD`原始文件
 
 ####示例
+- 合并`fixes`和`enhancements`到当前分支，来一次多方合并：
+```
+$ git merge fixes enhancements
+```
+
+- 合并`obsolete`到当前分支，使用`ours`合并策略：
+```
+$ git merge -s ours obsolete
+```
+
+- 合并`maint`到当前分支，但不做自动提交：
+```
+$ git merge --no-commit maint
+```
+>当你想进一步对合并做改动，或者只是想自己写合并提交日志时，你可以使用这种方法。
+>不要滥用这个选项去暗地里做一些重要改动而提交到这次合并中来。小的修补例如修改发布号或版本号是可以接受的。
 
 ####合并策略
 
 ####配置项
 
 ####参考
-
+`git-fmt-merge-msg(1)`,`git-pull(1)`,`gitattributes(5)`,`git-reset(1)`,`git-diff(1)`,`git-ls-files(1)`,`git-add(1)`,`git-rm(1)`,`git-mergetool(1)`
 ####GIT
 `git`指令的一部分。
 
